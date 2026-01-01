@@ -8,13 +8,14 @@
   assign current_time_adjusted = current_time_s | plus: utc_offset
 
   # Safe data access - updated to match your actual data structure
-  assign safe_glucose_value = merge_variables.glucose.value | default: "0.0"
-  assign safe_glucose_trend = merge_variables.glucose.trend | default: "stable"
+  assign safe_glucose_value = merge_variables.glucose.value | default: merge_variables.sgv | default: "0.0"
+  assign safe_glucose_trend_raw = merge_variables.glucose.trend | default: merge_variables.direction | default: merge_variables.glucose.direction | default: "flat"
   assign safe_glucose_status = merge_variables.glucose.status | default: "normal"
-  assign safe_glucose_timestamp = merge_variables.glucose.timestamp | default: "now"
+  assign safe_glucose_timestamp = merge_variables.glucose.timestamp | default: merge_variables.datetime | default: "now"
   assign safe_weather_temp = merge_variables.weather.temperature.current | default: 0
   assign safe_weather_feels = merge_variables.weather.temperature.feels_like | default: 0
   assign safe_weather_desc = merge_variables.weather.condition.description | default: "Unknown"
+  assign safe_weather_type = merge_variables.weather.condition.type | default: ""
   assign safe_weather_humidity = merge_variables.weather.humidity | default: 0
   assign safe_transport_location = merge_variables.transport.location | default: "Unknown Location"
   
@@ -25,12 +26,22 @@
   assign debug_weather_desc = merge_variables.weather.condition.description
   assign debug_departures_size = merge_variables.transport.departures.size
 
+  # Normalize weather icon key
+  assign weather_key = safe_weather_type
+  if weather_key == blank
+    assign weather_key = safe_weather_desc
+  endif
+  assign weather_key = weather_key | downcase | replace: " ", "" | replace: "_", "" | replace: "-", ""
+
+  # Normalize glucose trend for symbol, label, and chart behavior
+  assign glucose_trend_key = safe_glucose_trend_raw | downcase | replace: " ", "" | replace: "_", "" | replace: "-", ""
+
   # Glucose Status Flags
   assign glucose_needs_attention = false
   assign glucose_accent_color = false
   assign glucose_status_text = "Stable"
   case safe_glucose_status
-    when "low", "high"
+    when "low" or "high"
       assign glucose_needs_attention = true
       assign glucose_accent_color = true
       assign glucose_status_text = safe_glucose_status | capitalize
@@ -39,20 +50,45 @@
       assign glucose_status_text = "Warning"
   endcase
 
-  # Enhanced Glucose Trend Arrows - back to original trend names
-  assign trend_symbol = "•"
-  case safe_glucose_trend
-    when "rising_fast" then assign trend_symbol = "⇈"
-    when "rising" then assign trend_symbol = "↗"
-    when "rising_slowly" then assign trend_symbol = "↑"
-    when "stable" then assign trend_symbol = "→"
-    when "falling_slowly" then assign trend_symbol = "↓"
-    when "falling" then assign trend_symbol = "↘"
-    when "falling_fast" then assign trend_symbol = "⇊"
+  # Glucose trend arrows + labels (supports Nightscout + custom trends)
+  assign trend_symbol = "→"
+  assign trend_label = "Stable"
+  assign chart_direction = "stable"
+  case glucose_trend_key
+    when "doubleup" or "risingfast" or "risingfastly" or "rising_fast"
+      assign trend_symbol = "↑↑"
+      assign trend_label = "Rising fast"
+      assign chart_direction = "rising_fast"
+    when "singleup" or "rising"
+      assign trend_symbol = "↗"
+      assign trend_label = "Rising"
+      assign chart_direction = "rising"
+    when "fortyfiveup" or "risingslowly" or "rising_slowly"
+      assign trend_symbol = "↑"
+      assign trend_label = "Rising slowly"
+      assign chart_direction = "rising_slowly"
+    when "flat" or "stable"
+      assign trend_symbol = "→"
+      assign trend_label = "Stable"
+      assign chart_direction = "stable"
+    when "fortyfivedown" or "fallingslowly" or "falling_slowly"
+      assign trend_symbol = "↓"
+      assign trend_label = "Falling slowly"
+      assign chart_direction = "falling_slowly"
+    when "singledown" or "falling"
+      assign trend_symbol = "↘"
+      assign trend_label = "Falling"
+      assign chart_direction = "falling"
+    when "doubledown" or "fallingfast" or "falling_fast"
+      assign trend_symbol = "↓↓"
+      assign trend_label = "Falling fast"
+      assign chart_direction = "falling_fast"
   endcase
 
-  # Get glucose direction for chart
-  assign chart_direction = safe_glucose_trend
+  # Use trend label for normal readings to avoid a constant "Stable" label
+  unless glucose_needs_attention
+    assign glucose_status_text = trend_label
+  endunless
   assign chart_id = "glucose-bg-chart"
 %}
 
@@ -71,12 +107,44 @@
         <div class="data-row">
           <div class="icon-container">
             <div class="weather-icon" aria-hidden="true">
-              {% assign desc = safe_weather_desc | downcase %}
-              {% if desc contains "sun" or desc contains "clear" %}☀
-              {% elsif desc contains "cloud" %}☁
-              {% elsif desc contains "rain" or desc contains "shower" %}🌧
-              {% elsif desc contains "snow" %}❄
-              {% else %}🌤{% endif %}
+              {% case weather_key %}
+                {% when "sun" or "sunny" or "clear" %}
+                  <svg viewBox="0 0 24 24" class="icon-svg" role="img" aria-label="Sunny">
+                    <circle cx="12" cy="12" r="4" fill="currentColor"></circle>
+                    <line x1="12" y1="1.5" x2="12" y2="5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
+                    <line x1="12" y1="19" x2="12" y2="22.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
+                    <line x1="1.5" y1="12" x2="5" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
+                    <line x1="19" y1="12" x2="22.5" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
+                    <line x1="4.2" y1="4.2" x2="6.7" y2="6.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
+                    <line x1="17.3" y1="17.3" x2="19.8" y2="19.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
+                    <line x1="4.2" y1="19.8" x2="6.7" y2="17.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
+                    <line x1="17.3" y1="6.7" x2="19.8" y2="4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
+                  </svg>
+                {% when "cloud" or "cloudy" or "overcast" or "mostlycloudy" %}
+                  <svg viewBox="0 0 24 24" class="icon-svg" role="img" aria-label="Cloudy">
+                    <path d="M7 18h9a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.6-1.5A4.5 4.5 0 0 0 7 18z" fill="currentColor"></path>
+                  </svg>
+                {% when "rain" or "rainy" or "lightrain" or "heavyrain" or "shower" or "showers" or "rainshowers" or "drizzle" or "storm" or "thunder" %}
+                  <svg viewBox="0 0 24 24" class="icon-svg" role="img" aria-label="Rain">
+                    <path d="M7 14h9a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.6-1.5A4.5 4.5 0 0 0 7 14z" fill="currentColor"></path>
+                    <line x1="8" y1="17" x2="8" y2="21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
+                    <line x1="12" y1="17" x2="12" y2="21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
+                    <line x1="16" y1="17" x2="16" y2="21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
+                  </svg>
+                {% when "snow" or "snowy" or "lightsnow" or "heavysnow" or "sleet" %}
+                  <svg viewBox="0 0 24 24" class="icon-svg" role="img" aria-label="Snow">
+                    <path d="M7 14h9a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.6-1.5A4.5 4.5 0 0 0 7 14z" fill="currentColor"></path>
+                    <line x1="9" y1="17.5" x2="9" y2="20.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
+                    <line x1="15" y1="17.5" x2="15" y2="20.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
+                    <line x1="7.5" y1="19" x2="10.5" y2="19" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
+                    <line x1="13.5" y1="19" x2="16.5" y2="19" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
+                  </svg>
+                {% else %}
+                  <svg viewBox="0 0 24 24" class="icon-svg" role="img" aria-label="Partly cloudy">
+                    <circle cx="8" cy="8" r="3" fill="currentColor"></circle>
+                    <path d="M9 18h8a3.5 3.5 0 0 0 0-7 4.8 4.8 0 0 0-9.1-1.2A4 4 0 0 0 9 18z" fill="currentColor"></path>
+                  </svg>
+              {% endcase %}
             </div>
           </div>
           <div class="data-details">
@@ -128,7 +196,7 @@
             {% assign is_imminent = false %}
             {% if safe_mins_away <= 1 %}{% assign is_imminent = true %}{% endif %}
 
-            <div class="departure-item {% cycle 'bg--white', 'bg--gray-10' %}">
+            <div class="departure-item {% cycle 'bg--white', 'bg--gray-55' %}">
               <div class="departure-route">
                 <span class="route-badge {% if is_imminent %}route-badge--alert{% endif %}">{{ safe_route }}</span>
               </div>
@@ -173,7 +241,7 @@
   </div>
   
   <!-- Debug Info (small, unobtrusive) -->
-  <div style="position: fixed; bottom: 5px; right: 5px; font-size: 10px; color: #999; background: rgba(255,255,255,0.8); padding: 2px 5px; border-radius: 3px;">
+  <div style="position: fixed; bottom: 5px; right: 5px; font-size: 10px; color: var(--color-gray-30); background: var(--color-white); padding: 2px 5px; border-radius: 3px;">
     Val: {{ debug_glucose_value | default: "null" }} | Trend: {{ debug_glucose_trend | default: "null" }} | DEP: {{ debug_departures_size | default: "null" }}
   </div>
 </div>
@@ -194,9 +262,9 @@
     }
     
     // Safe data access with type checking
-    var glucoseValue = window.merge_variables.glucose.value;
-    var glucoseTimestamp = window.merge_variables.glucose.timestamp;
-    var glucoseTrend = window.merge_variables.glucose.trend;
+    var glucoseValue = window.merge_variables.glucose.value || window.merge_variables.sgv;
+    var glucoseTimestamp = window.merge_variables.glucose.timestamp || window.merge_variables.datetime;
+    var glucoseTrend = window.merge_variables.glucose.trend || window.merge_variables.direction || window.merge_variables.glucose.direction;
     
     // Convert to safe values with validation
     var glucoseNum = 0;
@@ -215,7 +283,22 @@
       }
       
       if (glucoseTrend && typeof glucoseTrend === 'string') {
-        trend = glucoseTrend;
+        var normalized = glucoseTrend.toLowerCase().replace(/[\s_-]/g, '');
+        if (normalized === 'doubleup' || normalized === 'risingfast' || normalized === 'risingfastly') {
+          trend = "rising_fast";
+        } else if (normalized === 'singleup' || normalized === 'rising') {
+          trend = "rising";
+        } else if (normalized === 'fortyfiveup' || normalized === 'risingslowly') {
+          trend = "rising_slowly";
+        } else if (normalized === 'flat' || normalized === 'stable') {
+          trend = "stable";
+        } else if (normalized === 'fortyfivedown' || normalized === 'fallingslowly') {
+          trend = "falling_slowly";
+        } else if (normalized === 'singledown' || normalized === 'falling') {
+          trend = "falling";
+        } else if (normalized === 'doubledown' || normalized === 'fallingfast') {
+          trend = "falling_fast";
+        }
       }
     } catch (e) {
       console.log("Error parsing glucose data:", e);
@@ -272,6 +355,7 @@
     if (!containerEl) return;
 
     if (window.Highcharts) {
+      var gray30 = getComputedStyle(document.documentElement).getPropertyValue('--color-gray-30').trim() || '#4d4d4d';
       Highcharts.chart(containerEl, {
         chart: {
           type: 'line',
@@ -306,7 +390,7 @@
           series: {
             threshold: null,
             animation: false,
-            lineWidth: 2,
+            lineWidth: 1,
             enableMouseTracking: false,
             marker: { enabled: false },
             states: { inactive: { opacity: 0.3 } }
@@ -314,7 +398,7 @@
         },
         series: [{
           data: data,
-          color: 'rgba(100, 150, 255, 0.3)'
+          color: gray30
         }]
       });
       return;
@@ -349,8 +433,9 @@
     var polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
     polyline.setAttribute('points', points);
     polyline.setAttribute('fill', 'none');
-    polyline.setAttribute('stroke', 'rgba(60, 120, 255, 0.8)');
-    polyline.setAttribute('stroke-width', '3');
+    var gray30 = getComputedStyle(document.documentElement).getPropertyValue('--color-gray-30').trim() || '#4d4d4d';
+    polyline.setAttribute('stroke', gray30);
+    polyline.setAttribute('stroke-width', '2');
     svg.appendChild(polyline);
     containerEl.appendChild(svg);
   };
@@ -385,7 +470,7 @@
   .departure-divider {
     height: 1px;
     width: 100%;
-    background: #e5e7eb;
+    background: var(--color-gray-30);
     margin: 0 0 0 72px;
     border: none;
   }
@@ -426,7 +511,7 @@
     right: 0;
     bottom: 0;
     z-index: 1;
-    opacity: 0.25;
+    opacity: 1;
     pointer-events: none; /* Prevent interaction with background chart */
     min-height: 120px; /* ensure space for chart */
   }
@@ -462,11 +547,6 @@
   }
   
   /* Keep the alternating background for visual separation */
-  .bg--white { background-color: #ffffff; }
-  .bg--gray-10 {
-    background-color: #f5f5f5;
-    background-image: repeating-linear-gradient(45deg, transparent, transparent 1px, #ffffff 1px, #ffffff 2px);
-  }
 
   /* --- TEXT ELEMENTS --- */
   .departure-destination {
@@ -481,8 +561,10 @@
   :root {
     --color-black: #000000;
     --color-white: #ffffff;
-    --color-accent: #ff0000;
-    --color-accent-light: #ffe6e6;
+    --color-gray-30: #4d4d4d;
+    --color-gray-55: #8c8c8c;
+    --color-accent: var(--color-black);
+    --color-accent-light: var(--color-gray-55);
 
     --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     --font-size-large: 3.5rem;
@@ -506,7 +588,7 @@
   body { 
     margin: 0; 
     padding: 0; 
-    background: #fff;
+    background: var(--color-white);
     min-height: 100vh;
   }
   
@@ -547,7 +629,7 @@
   }
 
   .card--weather, .card--glucose {
-    background-color: #f5f5f5; /* bg--gray-10 */
+    background-color: var(--color-gray-55);
   }
   
   .card--glucose-alert {
@@ -575,9 +657,19 @@
     justify-content: center;
     font-size: 2.5rem;
   }
+
+  .weather-icon {
+    color: var(--color-black);
+  }
+
+  .icon-svg {
+    width: 32px;
+    height: 32px;
+    display: block;
+  }
   
   .glucose-icon {
-    background-color: #d4d4d4; /* Similar to gray-30 */
+    background-color: var(--color-gray-30);
   }
   
   .glucose-icon--alert {
@@ -604,7 +696,7 @@
   }
 
   .card--transport-header {
-    background-color: #f5f5f5; /* bg--gray-10 */
+    background-color: var(--color-gray-55);
   }
   
   .transport-title {
@@ -682,7 +774,7 @@
   }
 
   .card--no-departures {
-    background-color: #f5f5f5; /* bg--gray-10 */
+    background-color: var(--color-gray-55);
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -698,15 +790,20 @@
   }
 
   .card--service-status {
-    background-color: #f5f5f5; /* bg--gray-10 */
+    background-color: var(--color-gray-55);
     border: var(--border-width-thin) solid var(--color-black);
     padding: 12px;
     margin-top: 8px;
   }
   
   .card--service-status-alert {
-    background-color: var(--color-accent-light);
-    border: var(--border-width-normal) solid var(--color-accent);
+    background-color: var(--color-gray-30);
+    border: var(--border-width-normal) solid var(--color-black);
+    color: var(--color-white);
+  }
+
+  .card--service-status-alert .service-status-text {
+    color: var(--color-white);
   }
   
   .service-status-text {
@@ -738,21 +835,13 @@
     }
   }
   
-  /* Shading classes */
-  .bg--black { background-color: #000000; }
-  .bg--gray-10 { background-color: #f5f5f5; }
-  .bg--gray-15 { background-color: #ebebeb; }
-  .bg--gray-20 { background-color: #e0e0e0; }
-  .bg--gray-25 { background-color: #d6d6d6; }
-  .bg--gray-30 { background-color: #cccccc; }
-  .bg--gray-35 { background-color: #c2c2c2; }
-  .bg--gray-40 { background-color: #b8b8b8; }
-  .bg--gray-45 { background-color: #adadad; }
-  .bg--gray-50 { background-color: #a3a3a3; }
-  .bg--gray-55 { background-color: #999999; }
-  .bg--gray-60 { background-color: #8f8f8f; }
-  .bg--gray-65 { background-color: #858585; }
-  .bg--gray-70 { background-color: #7a7a7a; }
-  .bg--gray-75 { background-color: #707070; }
-  .bg--white { background-color: #ffffff; }
+  /* Shading classes (2-bit, 4 grays) */
+  .bg--black { background-color: var(--color-black); }
+  .bg--white { background-color: var(--color-white); }
+  .bg--gray-30 { background-color: var(--color-gray-30); }
+  .bg--gray-55 { background-color: var(--color-gray-55); }
+  .text--black { color: var(--color-black); }
+  .text--white { color: var(--color-white); }
+  .text--gray-30 { color: var(--color-gray-30); }
+  .text--gray-55 { color: var(--color-gray-55); }
 </style>
