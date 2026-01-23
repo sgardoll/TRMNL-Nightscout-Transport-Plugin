@@ -2,7 +2,7 @@
 
 A dashboard plugin for TRMNL that displays glucose monitoring data, weather information, and public transport departures with a beautiful glucose trend background chart.
 
-https://www.youtube.com/watch?v=MPm60wxAQKY&pp=2AakAQ%3D%3D
+[![TRMNL YouTube Tutorial](https://img.youtube.com/vi/MPm60wxAQKY/0.jpg)](https://www.youtube.com/watch?v=MPm60wxAQKY)
 
 ## Features
 
