@@ -4,6 +4,8 @@ A dashboard plugin for TRMNL that displays glucose monitoring data, weather info
 
 [![TRMNL YouTube Tutorial](https://img.youtube.com/vi/MPm60wxAQKY/0.jpg)](https://www.youtube.com/watch?v=MPm60wxAQKY)
 
+## #Watch: The Calm Tech Revolution: Building a custom dashboard with TRMNL | Tutorial ###
+
 ## Features
 
 ### 🩺 Glucose Monitoring
