@@ -1,6 +1,8 @@
 # Health & Transport Dashboard for TRMNL
 
-A comprehensive dashboard plugin for TRMNL that displays glucose monitoring data, weather information, and public transport departures with a beautiful glucose trend background chart.
+A dashboard plugin for TRMNL that displays glucose monitoring data, weather information, and public transport departures with a beautiful glucose trend background chart.
+
+https://www.youtube.com/watch?v=MPm60wxAQKY&pp=2AakAQ%3D%3D
 
 ## Features
 
