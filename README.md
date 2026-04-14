@@ -1,204 +1,237 @@
 # Health & Transport Dashboard for TRMNL
 
-A dashboard plugin for TRMNL that displays glucose monitoring data, weather information, and public transport departures with a beautiful glucose trend background chart.
+A dashboard plugin for TRMNL that shows real-time glucose monitoring, daily vital metrics, your next calendar events, live public transport departures, and current weather — all in a clean two-column layout tuned for the TRMNL e-ink display.
 
 [![TRMNL YouTube Tutorial](https://img.youtube.com/vi/MPm60wxAQKY/0.jpg)](https://www.youtube.com/watch?v=MPm60wxAQKY)
 
-### Watch: [The Calm Tech Revolution: Building a custom dashboard with TRMNL | Tutorial](https://www.youtube.com/watch?v=MPm60wxAQKY) ###
-
+### Watch: [The Calm Tech Revolution: Building a custom dashboard with TRMNL | Tutorial](https://www.youtube.com/watch?v=MPm60wxAQKY)
 
 ## Features
 
 ### 🩺 Glucose Monitoring
-- **Real-time glucose readings** with trend arrows
-- **Background trend chart** showing glucose direction
-- **Alert highlighting** for high/low glucose levels
+- **Real-time readings** with a trend-direction pill badge
+- **Historical line chart** rendered from Nightscout glucose history (falls back to a simulated trend line if history is unavailable)
+- **Configurable alert thresholds** — high/low limits set in plugin settings drive an inverted alert card state
 - **Medical safety warnings** prominently displayed
-- **Text outline effects** for readability over chart background
 
-### 🌤️ Weather Display
-- Current temperature and "feels like" temperature
-- Weather condition descriptions with emoji icons
-- Humidity percentage display
-- Automatic weather icon selection
+### 💪 Vital Metrics
+- **Today's step count** from Google Fit
+- **Last night's sleep duration** as a formatted label (e.g. `7h 15m`)
+- Clean two-tile layout with minimal iconography
 
-### 🚌 Transport Information
-- **Live departure times** for public transport
-- **Multiple routes** with destinations
-- **Imminent departure alerts** (highlighted in red)
-- **Delay information** when available
-- **Service status notifications** (optional)
+### 📅 Upcoming Schedule
+- **Next two events** from Google Calendar, rendered side by side
+- **All-day event detection** — date-only events render as `All day` instead of a bogus midnight time range
+- Title whitespace is trimmed automatically
+
+### 🌤 Weather & Forecast
+- **Current temperature** with a condition icon (clear, partly cloudy, cloudy, rain, snow, storm)
+- **Forecast sentence** composed from feels-like temperature, humidity, and wind direction
+- **Wind direction** rendered as a British-English adjective (e.g. `north-westerly`) in the forecast sentence
+- Icon set maps Google Weather API's 41 condition enums down to six display categories
+
+### 🚌 Transit Departures
+- **Next four live departures** with route badge, destination, and minutes away
+- **Black header bar** with transit icon for visual contrast
+- **Imminent departures** (≤1 minute) render as `Now`
+- **Delay badge** (`+Nm`) renders when the source feed reports one
 
 ### 📊 Visual Design
-- **Two-column responsive layout**
-- **Clean card-based interface**
-- **Glucose trend background chart** using Chartkick + Highcharts
-- **Alternating departure row styling** for easy reading
-- **Alert color coding** for urgent information
+- **Two-column layout** — narrow left column (time, vitals, glucose) + wide right column (schedule, transit, weather)
+- **Clean light cards** with thin 1px borders, tuned for e-ink legibility
+- **Inverted weather tile** (black background, white text) for visual weight
+- **2-bit friendly palette** — black, white, and two grays
 
 ## Setup Requirements
 
-### Prerequisiteswhy w
-1. **TRMNL device** with plugin support
-2. **Data webhook** that provides the required data format
-3. **Internet connection** for live data updates
+### Prerequisites
+
+1. A **TRMNL device** with plugin support
+2. A **Buildship workflow** that fetches and reformats the required data into the webhook payload (remix template below)
+3. Accounts and credentials for the data sources you want to render:
+   - **Nightscout** instance and API token (for glucose)
+   - **Google Weather API** key via Google Cloud (for weather)
+   - **Google Fit** OAuth 2.0 refresh token (for steps and sleep)
+   - **Google Calendar** OAuth connection (for upcoming events)
+   - **Your transit provider** API key (the remix template ships with Transport for NSW; swap for your own provider as needed)
+4. Internet connection for live data updates
+
+### Quick Start: Remix the Buildship workflow
+
+Get a preconfigured workflow with every data source node and the reformat node already wired up:
+
+**https://buildship.vip/remix/d2ce3208-6c71-4c88-b491-9c5410490a93**
+
+After remixing:
+- Add your credentials for each data source as Buildship secrets / OAuth integrations
+- Configure the lat/long inputs for the Weather and Transit nodes to your location
+- Publish the workflow to get your webhook URL
+- Paste that URL into the plugin's **Data Webhook URL** setting in TRMNL
 
 ### Data Webhook Requirements
 
-Your webhook must return JSON data in this exact format:
-
-**Quick Start:** You can remix this BuildShip workflow template: https://buildship.vip/remix/59aca8c8-748c-4ed4-8caf-37e0665f5175
+Your webhook must return JSON in this shape. Only the fields the template actually reads are listed; extra fields are ignored.
 
 ```json
 {
   "merge_variables": {
-    "timestamp": "2025-09-05T11:33:12.580Z",
+    "timestamp": "2026-04-15T05:30:00.000Z",
     "glucose": {
-      "value": "8.2",
+      "value": "5.4",
       "unit": "mmol/L",
+      "mgdl": 97,
       "trend": "flat",
-      "timestamp": "2025-09-05T11:32:05.389Z",
-      "status": "normal"
+      "timestamp": "2026-04-15T05:28:00.000Z",
+      "delta": "+0",
+      "delta_mgdl": 0,
+      "history": [
+        { "time": "2026-04-15T05:13:00.000Z", "value": 5.3, "mgdl": 95 },
+        { "time": "2026-04-15T05:18:00.000Z", "value": 5.3, "mgdl": 95 },
+        { "time": "2026-04-15T05:23:00.000Z", "value": 5.4, "mgdl": 97 },
+        { "time": "2026-04-15T05:28:00.000Z", "value": 5.4, "mgdl": 97 }
+      ]
     },
-    "datetime": "2025-09-05T11:32:05.389Z",
-    "sgv": "8.2",
-    "direction": "Flat",
+    "health": {
+      "steps": 2662,
+      "sleep": {
+        "duration_min": 435,
+        "duration_label": "7h 15m",
+        "start": "2026-04-14T22:00:00.000Z",
+        "end": "2026-04-15T05:15:00.000Z"
+      }
+    },
+    "schedule": [
+      {
+        "title": "Design Review",
+        "start": "2026-04-15T11:00:00+10:00",
+        "end": "2026-04-15T12:30:00+10:00"
+      },
+      {
+        "title": "Team Offsite",
+        "start": "2026-04-16",
+        "end": "2026-04-17"
+      }
+    ],
     "transport": {
-      "location": "Your Stop Name",
+      "location": "Bayswater Rd before New Beach Rd",
       "departures": [
         {
           "route": "324",
           "destination": "City Center",
-          "platform": "A1",
-          "mins_away": 6,
-          "departure_time": "2025-09-05T11:39:06Z"
+          "mins_away": 4,
+          "departure_time": "2026-04-15T05:34:00Z"
         }
-      ],
-      "service_status": "Good service" // Optional
+      ]
     },
     "weather": {
       "temperature": {
-        "current": 15.4,
-        "feels_like": 15,
+        "current": 15,
+        "feels_like": 14,
         "unit": "celsius"
       },
       "condition": {
-        "description": "Cloudy",
-        "type": "cloudy",
-        "icon_url": "https://maps.gstatic.com/weather/v1/cloudy"
+        "description": "Partly Cloudy",
+        "type": "partly_cloudy"
       },
-      "humidity": 61,
-      "uv_index": 0,
+      "humidity": 85,
       "wind": {
-        "speed": 13,
-        "direction": "southeast",
-        "gust": 17,
-        "unit": "kilometers_per_hour"
+        "direction_label": "north-westerly"
       }
     }
   }
 }
 ```
 
+**Schedule events** can be either timed (`start` is a full ISO datetime containing a `T`) or all-day (`start` is a date-only string like `"2026-04-16"`). The template detects each case and renders timed events as a time range (`11:00 AM – 12:30 PM`) and all-day events as the literal text `All day`.
+
 ## Installation
 
-1. **Install the Plugin**
-   - Add this plugin to your TRMNL device
-   - Configure the required settings (see below)
-
-2. **Configure Settings**
-   - **Data Webhook URL**: Your webhook endpoint that provides the data
-   - **Transport Stop Name**: Display name for your transport location
-   - **Glucose Alert Levels**: High/low thresholds for glucose alerts (in mmol/L)
-
-3. **Test Your Setup**
-   - Verify your webhook returns the correct data format
-   - Check that your TRMNL displays the dashboard correctly
+1. **Remix the Buildship workflow** (link above), add your credentials, and publish to get your webhook URL
+2. **Install the plugin** on your TRMNL device
+3. **Configure the plugin settings** in the TRMNL UI (see below)
+4. **Verify** by hitting your webhook in a browser — you should see the JSON payload above — and confirm the TRMNL displays the dashboard correctly on its next refresh
 
 ## Configuration Options
 
 ### Required Settings
+
 | Setting | Description | Example |
-|---------|-------------|---------|
-| Data Webhook URL | Your webhook endpoint | `https://your-domain.com/webhook` |
-| Transport Stop Name | Display name for transport location | `Central Station` |
+|---|---|---|
+| Data Webhook URL | Your Buildship webhook endpoint | `https://xxxxx.buildship.run/trmnlPluginWebhook` |
+| Transport Stop Name | Display name for your transport location | `Central Station` |
 
 ### Optional Settings
+
 | Setting | Default | Description |
-|---------|---------|-------------|
-| High Glucose Alert | 10.0 mmol/L | Glucose level to highlight in red |
-| Low Glucose Alert | 4.0 mmol/L | Glucose level to highlight in red |
-| Refresh Interval | 5 minutes | How often to fetch new data |
+|---|---|---|
+| High Glucose Alert | `10.0` mmol/L | At or above this value, the glucose card inverts to alert state (black background, white text) |
+| Low Glucose Alert | `4.0` mmol/L | At or below this value, the glucose card inverts to alert state |
+| Refresh Interval | 5 minutes | How often TRMNL polls the webhook |
 
-## Glucose Directions
+> **Note:** Glucose alert thresholds are now evaluated in the Liquid template by comparing the current reading against these plugin settings. The Buildship workflow does **not** need to return a `glucose.status` field any more.
 
-The plugin supports these glucose trend directions:
+## Glucose Trend Directions
+
+The plugin recognises the standard Nightscout trend strings and a few synonyms. Each maps to a symbol in the trend pill:
 
 | Direction | Symbol | Meaning |
-|-----------|--------|---------|
-| `DoubleUp` | ⇈ | Rising fast |
-| `SingleUp` | ↗ | Rising |
-| `FortyFiveUp` | ↑ | Rising slowly |
-| `Flat` | → | Stable |
-| `FortyFiveDown` | ↓ | Falling slowly |
-| `SingleDown` | ↘ | Falling |
-| `DoubleDown` | ⇊ | Falling fast |
+|---|---|---|
+| `DoubleUp` | `↑↑` | Rising fast |
+| `SingleUp` | `↗` | Rising |
+| `FortyFiveUp` | `↑` | Rising slowly |
+| `Flat` | `→` | Stable |
+| `FortyFiveDown` | `↓` | Falling slowly |
+| `SingleDown` | `↘` | Falling |
+| `DoubleDown` | `↓↓` | Falling fast |
 
 ## Medical Disclaimer
 
 ⚠️ **IMPORTANT MEDICAL WARNING** ⚠️
 
-This plugin is for **informational purposes only** and should **NEVER** be used for medical decisions. The displayed glucose data may be outdated by an hour or more. 
+This plugin is for **informational purposes only** and should **NEVER** be used for medical decisions. The displayed glucose data may be outdated by several minutes or more.
 
 **Always:**
 - Follow advice from medical specialists
 - Use proper medical devices for treatment decisions
-- Contact emergency services (112/911) if you feel unwell
+- Contact emergency services (112/911 or your local equivalent) if you feel unwell
 
 ## Technical Details
 
 ### Dependencies
-- **Chartkick 5.0.1** - Chart rendering library
-- **Highcharts 12.3.0** - Chart visualization engine
-- **TRMNL Liquid Engine** - Template processing
+- **Highcharts 12.3.0** — loaded from TRMNL's CDN for the glucose history chart (with an inline SVG fallback if Highcharts fails to load)
+- **TRMNL Liquid engine** — template rendering
 
 ### Chart Features
-- **Background positioning** - Chart appears behind glucose data
-- **Semi-transparent styling** - Doesn't interfere with text readability
-- **Text outline effects** - White shadows ensure text visibility
-- **Trend simulation** - Creates 3-point trend line based on current direction
-- **Responsive sizing** - Adapts to card container dimensions
+- **Real historical data** from `glucose.history[]` when the Buildship workflow provides it
+- **Graceful fallback** to a 6-point simulated trend line extrapolated from the current value and trend direction when history is unavailable
+- **Compact sparkline** — axis-less, inside the glucose card
+- **Auto-scaling Y-axis** with `softMin`/`softMax` tuned for mmol/L ranges
+
+### Alert Logic
+The template coerces `glucose.value` to a number and compares it against the `glucose_alert_high` and `glucose_alert_low` plugin settings. When the current reading is at or above the high threshold or at or below the low threshold, the glucose card switches to an inverted (black/white) alert state.
+
+### Template Variables Used
+- `merge_variables.glucose.{value, trend, timestamp, history}`
+- `merge_variables.health.{steps, sleep.duration_label}`
+- `merge_variables.schedule[].{title, start, end}`
+- `merge_variables.transport.{location, departures[]}`
+- `merge_variables.weather.{temperature, condition, humidity, wind.direction_label}`
+- `glucose_alert_high`, `glucose_alert_low` (from plugin settings)
+- `trmnl.user.utc_offset` (from the TRMNL runtime)
 
 ### Browser Compatibility
 - Modern browsers with ES6+ support
-- Highcharts compatibility requirements
-- TRMNL display engine support
+- Highcharts runtime requirements
+- TRMNL display engine
 
 ## Development
 
 ### File Structure
 ```
-├── full.liquid         # Main template file
-├── settings.yml       # Plugin configuration
-└── README.md          # Documentation
-```
-
-### Template Variables Used
-- `merge_variables.sgv` - Glucose value
-- `merge_variables.direction` - Glucose trend direction
-- `merge_variables.glucose.*` - Nested glucose data
-- `merge_variables.weather.*` - Weather information
-- `merge_variables.transport.*` - Transport data
-
-### Customization
-The template uses CSS custom properties for easy theming:
-```css
-:root {
-  --color-accent: #ff0000;        /* Alert color */
-  --color-accent-light: #ffe6e6;  /* Alert background */
-  --font-size-large: 4rem;        /* Time display */
-  --font-size-medium: 2.5rem;     /* Main values */
-}
+├── full.liquid     # Main template file
+├── settings.yml    # Plugin configuration
+├── plugin.json     # Plugin metadata
+└── README.md       # This documentation
 ```
 
 ## Troubleshooting
@@ -206,32 +239,40 @@ The template uses CSS custom properties for easy theming:
 ### Common Issues
 
 **No data displaying:**
-- Check webhook URL is correct and accessible
-- Verify webhook returns correct JSON format
-- Check TRMNL network connectivity
+- Check that the webhook URL is correct and reachable
+- Verify the webhook returns JSON in the expected format
+- Check TRMNL device network connectivity
 
 **Glucose chart not showing:**
-- Ensure Chartkick/Highcharts libraries are loading
-- Check browser console for JavaScript errors
-- Verify glucose data (`sgv`, `direction`, `datetime`) is present
+- Ensure Highcharts is loading (check browser console when previewing)
+- Verify the payload includes either `glucose.history[]` or at least `glucose.value` + `glucose.trend`
+
+**Steps and Sleep showing `0` / `—`:**
+- The Google Fit node isn't wired into the reformat node's `health` input in Buildship
+- The user genuinely has no activity for today / no sleep session logged last night
+- The Google Fit OAuth refresh token has expired and needs rotating
+
+**Schedule shows "No upcoming events":**
+- The Google Calendar node isn't wired into the reformat node's `schedule` input
+- The Calendar API call is missing `timeMin=<now>` — without it, the API returns the earliest events in the calendar's history instead of upcoming ones
+- There genuinely are no events in the next window
+
+**Forecast sentence missing the wind clause:**
+- The weather payload doesn't include `wind.direction_label`
+- The current cardinal direction isn't in the 16-point compass map in the Buildship reformat node
 
 **Transport data missing:**
-- Confirm `transport.departures` array is populated
-- Check departure times are in correct ISO format
-- Verify route/destination strings are present
-
-**Styling issues:**
-- Check CSS is loading correctly
-- Verify responsive grid layout
-- Test on different screen sizes
+- Confirm `transport.departures` is a non-empty array
+- Check that departure times are valid ISO datetime strings
+- Verify route and destination strings are populated
 
 ## Support
 
-For issues and feature requests, please create an issue on the project repository.
+For issues and feature requests, please open an issue on the project repository.
 
 ## Attribution
 
-Contains a fork of 'Nightscout Glucose Trend' (https://usetrmnl.com/recipes/30521)
+Contains a fork of [Nightscout Glucose Trend](https://usetrmnl.com/recipes/30521).
 
 ## License
 
