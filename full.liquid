@@ -1,843 +1,661 @@
-<!-- Chart Libraries -->
+<!-- Health & Transport Dashboard — light card layout -->
 <script src="https://usetrmnl.com/js/highcharts/12.3.0/highcharts.js"></script>
 
 {% liquid
-  # --- Liquid Logic ---
-  assign current_time_s = "now" | date: "%s"
+  # ---------- Time ----------
+  assign now_s = "now" | date: "%s"
   assign utc_offset = trmnl.user.utc_offset | default: 0
-  assign current_time_adjusted = current_time_s | plus: utc_offset
+  assign now_local = now_s | plus: utc_offset
 
-  # Safe data access - updated to match your actual data structure
-  assign safe_glucose_value = merge_variables.glucose.value | default: merge_variables.sgv | default: "0.0"
-  assign safe_glucose_trend_raw = merge_variables.glucose.trend | default: merge_variables.direction | default: merge_variables.glucose.direction | default: "flat"
-  assign safe_glucose_status = merge_variables.glucose.status | default: "normal"
-  assign safe_glucose_timestamp = merge_variables.glucose.timestamp | default: merge_variables.datetime | default: "now"
-  assign safe_weather_temp = merge_variables.weather.temperature.current | default: 0
-  assign safe_weather_feels = merge_variables.weather.temperature.feels_like | default: 0
-  assign safe_weather_desc = merge_variables.weather.condition.description | default: "Unknown"
-  assign safe_weather_type = merge_variables.weather.condition.type | default: ""
-  assign safe_weather_humidity = merge_variables.weather.humidity | default: 0
-  assign safe_transport_location = merge_variables.transport.location | default: "Unknown Location"
-  
-  # Debug: Store raw values for troubleshooting
-  assign debug_glucose_value = merge_variables.glucose.value
-  assign debug_glucose_trend = merge_variables.glucose.trend
-  assign debug_glucose_status = merge_variables.glucose.status
-  assign debug_weather_desc = merge_variables.weather.condition.description
-  assign debug_departures_size = merge_variables.transport.departures.size
+  # ---------- Glucose ----------
+  assign g_value = merge_variables.glucose.value | default: merge_variables.sgv | default: "—"
+  assign g_trend_raw = merge_variables.glucose.trend | default: merge_variables.direction | default: "flat"
+  assign g_ts = merge_variables.glucose.timestamp | default: merge_variables.datetime
 
-  # Normalize weather icon key
-  assign weather_key = safe_weather_type
-  if weather_key == blank
-    assign weather_key = safe_weather_desc
-  endif
-  assign weather_key = weather_key | downcase | replace: " ", "" | replace: "_", "" | replace: "-", ""
+  # Numeric copy of the current value for threshold comparison.
+  # Liquid coerces strings like "5.1" when they hit an arithmetic filter.
+  assign g_value_num = g_value | times: 1.0
 
-  # Normalize glucose trend for symbol, label, and chart behavior
-  assign glucose_trend_key = safe_glucose_trend_raw | downcase | replace: " ", "" | replace: "_", "" | replace: "-", ""
+  # Thresholds come from plugin settings (settings.yml → glucose_alert_high/low).
+  # TRMNL exposes custom fields as top-level Liquid variables by keyname.
+  assign g_high = glucose_alert_high | default: 10.0 | times: 1.0
+  assign g_low  = glucose_alert_low  | default: 4.0  | times: 1.0
 
-  # Glucose Status Flags
-  assign glucose_needs_attention = false
-  assign glucose_accent_color = false
-  assign glucose_status_text = "Stable"
-  case safe_glucose_status
-    when "low" or "high"
-      assign glucose_needs_attention = true
-      assign glucose_accent_color = true
-      assign glucose_status_text = safe_glucose_status | capitalize
-    when "warning"
-      assign glucose_needs_attention = true
-      assign glucose_status_text = "Warning"
-  endcase
-
-  # Glucose trend arrows + labels (supports Nightscout + custom trends)
+  assign g_trend_key = g_trend_raw | downcase | replace: " ", "" | replace: "_", "" | replace: "-", ""
   assign trend_symbol = "→"
-  assign trend_label = "Stable"
-  assign chart_direction = "stable"
-  case glucose_trend_key
-    when "doubleup" or "risingfast" or "risingfastly" or "rising_fast"
+  case g_trend_key
+    when "doubleup" or "risingfast" or "risingfastly"
       assign trend_symbol = "↑↑"
-      assign trend_label = "Rising fast"
-      assign chart_direction = "rising_fast"
     when "singleup" or "rising"
       assign trend_symbol = "↗"
-      assign trend_label = "Rising"
-      assign chart_direction = "rising"
-    when "fortyfiveup" or "risingslowly" or "rising_slowly"
+    when "fortyfiveup" or "risingslowly"
       assign trend_symbol = "↑"
-      assign trend_label = "Rising slowly"
-      assign chart_direction = "rising_slowly"
     when "flat" or "stable"
       assign trend_symbol = "→"
-      assign trend_label = "Stable"
-      assign chart_direction = "stable"
-    when "fortyfivedown" or "fallingslowly" or "falling_slowly"
+    when "fortyfivedown" or "fallingslowly"
       assign trend_symbol = "↓"
-      assign trend_label = "Falling slowly"
-      assign chart_direction = "falling_slowly"
     when "singledown" or "falling"
       assign trend_symbol = "↘"
-      assign trend_label = "Falling"
-      assign chart_direction = "falling"
-    when "doubledown" or "fallingfast" or "falling_fast"
+    when "doubledown" or "fallingfast"
       assign trend_symbol = "↓↓"
-      assign trend_label = "Falling fast"
-      assign chart_direction = "falling_fast"
   endcase
 
-  # Use trend label for normal readings to avoid a constant "Stable" label
-  unless glucose_needs_attention
-    assign glucose_status_text = trend_label
-  endunless
-  assign chart_id = "glucose-bg-chart"
+  assign g_alert = false
+  if g_value_num > 0
+    if g_value_num <= g_low or g_value_num >= g_high
+      assign g_alert = true
+    endif
+  endif
+
+  # ---------- Vital Metrics (Steps + Sleep) ----------
+  assign v_steps = merge_variables.health.steps | default: 0
+  assign v_sleep_label = merge_variables.health.sleep.duration_label | default: "—"
+
+  # ---------- Schedule ----------
+  assign schedule = merge_variables.schedule | default: empty
+
+  # ---------- Transport ----------
+  assign tr_location = merge_variables.transport.location | default: "Unknown"
+  assign departures = merge_variables.transport.departures | default: empty
+
+  # ---------- Weather ----------
+  assign w_temp = merge_variables.weather.temperature.current | default: 0
+  assign w_feels = merge_variables.weather.temperature.feels_like | default: 0
+  assign w_desc = merge_variables.weather.condition.description | default: "Unknown"
+  assign w_type = merge_variables.weather.condition.type | default: ""
+  assign w_humidity = merge_variables.weather.humidity | default: 0
+  assign w_wind_label = merge_variables.weather.wind.direction_label | default: ""
+
+  assign w_key = w_type | downcase | replace: "_", "" | replace: "-", "" | replace: " ", ""
+  if w_key == blank
+    assign w_key = w_desc | downcase | replace: " ", "" | replace: "_", "" | replace: "-", ""
+  endif
+
+  assign chart_id = "glucose-chart"
 %}
 
-<div class="dashboard-root">
-  <div class="dashboard-grid">
-    <!-- Left Column: Health Data -->
-    <div class="dashboard-col">
-      <!-- Time Display -->
-      <div class="card card--time">
-        <div class="time-main">{{ current_time_adjusted | date: "%-I:%M" }}<span class="time-period">{{ current_time_adjusted | date: "%P" }}</span></div>
-        <div class="time-sub">{{ current_time_adjusted | date: "%A, %B %d" }}</div>
+<div class="dashboard">
+  <div class="grid">
+
+    <!-- ============ LEFT COLUMN ============ -->
+    <aside class="col col--left">
+
+      <!-- TIME -->
+      <div class="time-block">
+        <div class="time-main">{{ now_local | date: "%H:%M" }}</div>
+        <div class="time-sub">{{ now_local | date: "%A, %b %-d" | upcase }}</div>
       </div>
 
-      <!-- Weather Card -->
-      <div class="card card--weather">
-        <div class="data-row">
-          <div class="icon-container">
-            <div class="weather-icon" aria-hidden="true">
-              {% case weather_key %}
-                {% when "sun" or "sunny" or "clear" %}
-                  <svg viewBox="0 0 24 24" class="icon-svg" role="img" aria-label="Sunny">
-                    <circle cx="12" cy="12" r="4" fill="currentColor"></circle>
-                    <line x1="12" y1="1.5" x2="12" y2="5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
-                    <line x1="12" y1="19" x2="12" y2="22.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
-                    <line x1="1.5" y1="12" x2="5" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
-                    <line x1="19" y1="12" x2="22.5" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
-                    <line x1="4.2" y1="4.2" x2="6.7" y2="6.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
-                    <line x1="17.3" y1="17.3" x2="19.8" y2="19.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
-                    <line x1="4.2" y1="19.8" x2="6.7" y2="17.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
-                    <line x1="17.3" y1="6.7" x2="19.8" y2="4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
-                  </svg>
-                {% when "cloud" or "cloudy" or "overcast" or "mostlycloudy" %}
-                  <svg viewBox="0 0 24 24" class="icon-svg" role="img" aria-label="Cloudy">
-                    <path d="M7 18h9a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.6-1.5A4.5 4.5 0 0 0 7 18z" fill="currentColor"></path>
-                  </svg>
-                {% when "rain" or "rainy" or "lightrain" or "heavyrain" or "shower" or "showers" or "rainshowers" or "drizzle" or "storm" or "thunder" %}
-                  <svg viewBox="0 0 24 24" class="icon-svg" role="img" aria-label="Rain">
-                    <path d="M7 14h9a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.6-1.5A4.5 4.5 0 0 0 7 14z" fill="currentColor"></path>
-                    <line x1="8" y1="17" x2="8" y2="21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
-                    <line x1="12" y1="17" x2="12" y2="21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
-                    <line x1="16" y1="17" x2="16" y2="21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
-                  </svg>
-                {% when "snow" or "snowy" or "lightsnow" or "heavysnow" or "sleet" %}
-                  <svg viewBox="0 0 24 24" class="icon-svg" role="img" aria-label="Snow">
-                    <path d="M7 14h9a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.6-1.5A4.5 4.5 0 0 0 7 14z" fill="currentColor"></path>
-                    <line x1="9" y1="17.5" x2="9" y2="20.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
-                    <line x1="15" y1="17.5" x2="15" y2="20.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
-                    <line x1="7.5" y1="19" x2="10.5" y2="19" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
-                    <line x1="13.5" y1="19" x2="16.5" y2="19" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></line>
-                  </svg>
-                {% else %}
-                  <svg viewBox="0 0 24 24" class="icon-svg" role="img" aria-label="Partly cloudy">
-                    <circle cx="8" cy="8" r="3" fill="currentColor"></circle>
-                    <path d="M9 18h8a3.5 3.5 0 0 0 0-7 4.8 4.8 0 0 0-9.1-1.2A4 4 0 0 0 9 18z" fill="currentColor"></path>
-                  </svg>
-              {% endcase %}
-            </div>
+      <div class="rule"></div>
+
+      <!-- VITAL METRICS -->
+      <div class="section-label">VITAL METRICS</div>
+      <div class="vitals">
+        <div class="vital">
+          <div class="vital__label">STEPS</div>
+          <div class="vital__row">
+            <div class="vital__value">{{ v_steps }}</div>
+            <svg class="vital__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="13" cy="4.5" r="2" fill="currentColor"/>
+              <path d="M7 22l2.5-7 2.8 2.8v5M12 11.5l3.3-1 3.7 3.7M14 14.5l-0.8 2.5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
           </div>
-          <div class="data-details">
-            <div class="temp-main">{{ safe_weather_temp | round }}°C</div>
-            <div class="temp-sub">{{ safe_weather_desc | capitalize }}</div>
-            <div class="temp-meta">Feels {{ safe_weather_feels | round }}° • {{ safe_weather_humidity | round }}% Humidity</div>
+        </div>
+        <div class="vital">
+          <div class="vital__label">SLEEP</div>
+          <div class="vital__row">
+            <div class="vital__value vital__value--sm">{{ v_sleep_label }}</div>
+            <svg class="vital__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" fill="currentColor"/>
+            </svg>
           </div>
         </div>
       </div>
 
-      <!-- Glucose Card with Background Chart -->
-      <div class="card card--glucose glucose-with-chart {% if glucose_needs_attention %}card--glucose-alert{% endif %}">
-        <!-- Background Chart Container -->
-        <div class="glucose-chart-background" id="{{chart_id}}"></div>
-        
-        <!-- Glucose Content (foreground) -->
-        <div class="data-row">
-          <div class="icon-container">
-            <div class="glucose-icon {% if glucose_accent_color %}glucose-icon--alert{% endif %}" aria-hidden="true">{{ trend_symbol }}</div>
-          </div>
-          <div class="data-details">
-            <div class="glucose-main {% if glucose_accent_color %}text--accent{% endif %}">{{ safe_glucose_value }} mmol/L</div>
-            <div class="glucose-sub {% if glucose_accent_color %}text--accent{% endif %}">{{ glucose_status_text }}</div>
-            <div class="glucose-meta">Updated: {% if safe_glucose_timestamp != blank %}{{ safe_glucose_timestamp | date: "%s" | plus: utc_offset | date: "%-I:%M %P" }}{% else %}No data{% endif %}
-              {% if merge_variables.glucose.delta %} • Δ {{ merge_variables.glucose.delta }}{% endif %}
-            </div>
-          </div>
+      <!-- GLUCOSE -->
+      <div class="card card--glucose {% if g_alert %}card--alert{% endif %}">
+        <div class="glucose__head">
+          <div class="section-label">GLUCOSE LEVEL</div>
+          <div class="trend-pill" aria-label="Glucose trend">{{ trend_symbol }}</div>
+        </div>
+        <div class="glucose__value">{{ g_value }} mmol/L</div>
+        <div class="glucose__chart" id="{{ chart_id }}"></div>
+        <div class="glucose__updated">
+          UPDATED {% if g_ts %}{{ g_ts | date: "%s" | plus: utc_offset | date: "%-I:%M %p" }}{% else %}—{% endif %}
         </div>
       </div>
-    </div>
 
-    <!-- Right Column: Transport Departures -->
-    <div class="dashboard-col">
-      <!-- Transport Header -->
-      <div class="card card--transport-header">
-        <div class="transport-title">Next Departures</div>
-        <div class="transport-location">{{ safe_transport_location }}</div>
-      </div>
+    </aside>
 
-      <!-- Departures List -->
-      <div class="departures-list">
-        {% assign departures_array = merge_variables.transport.departures | default: empty %}
-        {% if departures_array and departures_array.size > 0 %}
-          {% for departure in departures_array limit: 8 %}
-            {% assign safe_route = departure.route | default: "?" %}
-            {% assign safe_destination = departure.destination | default: "Unknown" %}
-            {% assign safe_mins_away = departure.mins_away | default: 0 %}
-            {% assign safe_delay = departure.delay | default: 0 %}
-            {% assign is_imminent = false %}
-            {% if safe_mins_away <= 1 %}{% assign is_imminent = true %}{% endif %}
+    <!-- ============ RIGHT COLUMN ============ -->
+    <section class="col col--right">
 
-            <div class="departure-item {% cycle 'bg--white', 'bg--gray-55' %}">
-              <div class="departure-route">
-                <span class="route-badge {% if is_imminent %}route-badge--alert{% endif %}">{{ safe_route }}</span>
+      <!-- UPCOMING SCHEDULE -->
+      <div class="card card--schedule">
+        <div class="section-label">UPCOMING SCHEDULE</div>
+        <div class="schedule">
+          {% if schedule.size > 0 %}
+            {% for ev in schedule limit: 2 %}
+              <div class="schedule__event">
+                <div class="schedule__title clamp--1">{{ ev.title | strip }}</div>
+                <div class="schedule__time">
+                  {% if ev.start contains "T" %}
+                    {{ ev.start | date: "%s" | plus: utc_offset | date: "%-I:%M %p" }} – {{ ev.end | date: "%s" | plus: utc_offset | date: "%-I:%M %p" }}
+                  {% else %}
+                    All day
+                  {% endif %}
+                </div>
               </div>
-              <div class="departure-info">
-                <div class="departure-destination clamp--1">{{ safe_destination }}</div>
-              </div>
-              <div class="departure-timing">
-                {% if is_imminent %}
-                <div class="timing-main timing-main--alert">Now</div>
-                {% else %}
-                <div class="timing-main">{{ safe_mins_away | round }}m</div>
-                {% endif %}
-                {% if safe_delay and safe_delay > 0 %}
-                <div class="timing-delay">+{{ safe_delay }}m</div>
-                {% endif %}
-              </div>
+            {% endfor %}
+          {% else %}
+            <div class="schedule__event schedule__event--empty">
+              <div class="schedule__title">No upcoming events</div>
             </div>
-            {% unless forloop.last %}
-              <div class="departure-divider"></div>
-            {% endunless %}
-          {% endfor %}
-        {% else %}
-          <div class="card card--no-departures">
-            <div class="no-departures-icon" aria-hidden="true">🚌</div>
-            <div class="no-departures-text">No upcoming departures</div>
-          </div>
-        {% endif %}
+          {% endif %}
+        </div>
       </div>
 
-      <!-- Service Status (optional - only show if provided) -->
-      {% assign safe_service_status = merge_variables.transport.service_status | default: "" %}
-      {% if safe_service_status != blank %}
-        {% assign is_service_alert = false %}
-        {% if safe_service_status contains 'delay' or safe_service_status contains 'cancel' %}
-          {% assign is_service_alert = true %}
-        {% endif %}
-        <div class="card card--service-status {% if is_service_alert %}card--service-status-alert{% endif %}" role="status">
-          <div class="service-status-text {% if is_service_alert %}text--accent{% endif %}">{{ safe_service_status }}</div>
+      <!-- TRANSIT DEPARTURES -->
+      <div class="card card--transit">
+        <div class="transit__header">
+          <div class="transit__title">TRANSIT DEPARTURES</div>
+          <svg class="transit__icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 17V6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v11M5 17h14M5 17v2a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-2M16 17v2a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-2M7 10h10M7.5 13.5h0.01M16.5 13.5h0.01" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
         </div>
-      {% endif %}
-    </div>
+        <div class="transit__body">
+          {% if departures.size > 0 %}
+            {% for dep in departures limit: 4 %}
+              {% assign route = dep.route | default: "?" %}
+              {% assign dest = dep.destination | default: "Unknown" %}
+              {% assign mins = dep.mins_away | default: 0 %}
+              {% assign delay = dep.delay | default: 0 %}
+              <div class="transit-row">
+                <div class="transit-row__badge">{{ route }}</div>
+                <div class="transit-row__dest clamp--1">{{ dest }}</div>
+                <div class="transit-row__time">
+                  {% if mins <= 0 %}Now{% else %}{{ mins | round }}m{% endif %}{% if delay and delay > 0 %}<span class="transit-row__delay"> +{{ delay }}m</span>{% endif %}
+                </div>
+              </div>
+              {% unless forloop.last %}<div class="transit-row__rule"></div>{% endunless %}
+            {% endfor %}
+          {% else %}
+            <div class="transit-row--empty">No upcoming departures</div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- WEATHER + FORECAST -->
+      <div class="weather-row">
+        <div class="card card--now">
+          <div class="now__icon" aria-hidden="true">
+            {% case w_key %}
+              {% when "clear" or "sun" or "sunny" %}
+                <svg viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="4" fill="currentColor"/>
+                  <g stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+                    <line x1="12" y1="1.5" x2="12" y2="5"/>
+                    <line x1="12" y1="19" x2="12" y2="22.5"/>
+                    <line x1="1.5" y1="12" x2="5" y2="12"/>
+                    <line x1="19" y1="12" x2="22.5" y2="12"/>
+                    <line x1="4.2" y1="4.2" x2="6.7" y2="6.7"/>
+                    <line x1="17.3" y1="17.3" x2="19.8" y2="19.8"/>
+                    <line x1="4.2" y1="19.8" x2="6.7" y2="17.3"/>
+                    <line x1="17.3" y1="6.7" x2="19.8" y2="4.2"/>
+                  </g>
+                </svg>
+              {% when "cloudy" or "overcast" or "mostlycloudy" %}
+                <svg viewBox="0 0 24 24">
+                  <path d="M7 18h9a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.6-1.5A4.5 4.5 0 0 0 7 18z" fill="currentColor"/>
+                </svg>
+              {% when "rain" or "rainy" or "drizzle" or "lightrain" or "heavyrain" or "showers" %}
+                <svg viewBox="0 0 24 24">
+                  <path d="M7 14h9a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.6-1.5A4.5 4.5 0 0 0 7 14z" fill="currentColor"/>
+                  <g stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+                    <line x1="8" y1="17" x2="8" y2="21"/>
+                    <line x1="12" y1="17" x2="12" y2="21"/>
+                    <line x1="16" y1="17" x2="16" y2="21"/>
+                  </g>
+                </svg>
+              {% when "snow" or "snowy" or "sleet" %}
+                <svg viewBox="0 0 24 24">
+                  <path d="M7 14h9a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.6-1.5A4.5 4.5 0 0 0 7 14z" fill="currentColor"/>
+                  <g stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+                    <line x1="9" y1="17.5" x2="9" y2="20.5"/>
+                    <line x1="15" y1="17.5" x2="15" y2="20.5"/>
+                  </g>
+                </svg>
+              {% when "storm" or "thunderstorm" or "thunder" %}
+                <svg viewBox="0 0 24 24">
+                  <path d="M7 14h9a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.6-1.5A4.5 4.5 0 0 0 7 14z" fill="currentColor"/>
+                  <path d="M11.5 15l-2 4h2.5l-1 3 3.5-5h-2.5l1.2-2z" fill="currentColor"/>
+                </svg>
+              {% else %}
+                <svg viewBox="0 0 24 24">
+                  <circle cx="8" cy="8" r="3" fill="currentColor"/>
+                  <path d="M9 18h8a3.5 3.5 0 0 0 0-7 4.8 4.8 0 0 0-9.1-1.2A4 4 0 0 0 9 18z" fill="currentColor"/>
+                </svg>
+            {% endcase %}
+          </div>
+          <div class="now__text">
+            <div class="now__temp">{{ w_temp | round }}°C</div>
+            <div class="now__desc">{{ w_desc | upcase }}</div>
+          </div>
+        </div>
+
+        <div class="card card--forecast">
+          <div class="section-label">FORECAST</div>
+          <div class="forecast__main">Feels like {{ w_feels | round }}°C</div>
+          <div class="forecast__sub">{{ w_humidity | round }}% humidity{% if w_wind_label != blank %} with {{ w_wind_label }} winds{% endif %}.</div>
+        </div>
+      </div>
+
+    </section>
   </div>
-  
 </div>
 
-<!-- Glucose Background Chart Script -->
+<!-- ============ GLUCOSE CHART ============ -->
 <script>
-  // Make webhook data available to chart script
-  window.merge_variables = {{ merge_variables | json }};
-  
-  // Debug: Log the data structure
-  console.log("Webhook data received:", window.merge_variables);
-  
-  var createGlucoseBackgroundChart = function() {
-    // Only proceed if we have glucose data
-    if (!window.merge_variables || !window.merge_variables.glucose) {
-      console.log("No glucose data available for chart");
-      return;
+  (function() {
+    var data = {{ merge_variables | json }};
+    if (!data || !data.glucose) return;
+
+    // Normalize a time value that might be ms epoch, sec epoch, or ISO string.
+    function toMs(raw) {
+      if (raw == null) return NaN;
+      if (typeof raw === 'number') return raw > 1e12 ? raw : raw * 1000;
+      return new Date(raw).getTime();
     }
-    
-    // Safe data access with type checking
-    var glucoseValue = window.merge_variables.glucose.value || window.merge_variables.sgv;
-    var glucoseTimestamp = window.merge_variables.glucose.timestamp || window.merge_variables.datetime;
-    var glucoseTrend = window.merge_variables.glucose.trend || window.merge_variables.direction || window.merge_variables.glucose.direction;
-    
-    // Convert to safe values with validation
-    var glucoseNum = 0;
-    var glucoseTime = new Date().getTime();
-    var trend = "stable";
-    
-    try {
-      if (glucoseValue !== null && glucoseValue !== undefined) {
-        glucoseNum = parseFloat(String(glucoseValue));
-        if (isNaN(glucoseNum)) glucoseNum = 0;
+
+    // Prefer real history from the webhook. Fall back to a simulated trend line
+    // extrapolated from the current value + direction so the card isn't empty.
+    var points = [];
+    var history = data.glucose.history;
+    if (Array.isArray(history) && history.length > 1) {
+      for (var i = 0; i < history.length; i++) {
+        var p = history[i];
+        var t = toMs(p.time || p.datetime || p.timestamp || p.date);
+        var v = parseFloat(p.value != null ? p.value : p.sgv);
+        if (!isNaN(t) && !isNaN(v)) points.push([t, Math.round(v * 10) / 10]);
       }
-      
-      if (glucoseTimestamp) {
-        var parsedTime = new Date(String(glucoseTimestamp)).getTime();
-        if (!isNaN(parsedTime)) glucoseTime = parsedTime;
+      points.sort(function(a, b) { return a[0] - b[0]; });
+    } else {
+      var current = parseFloat(data.glucose.value != null ? data.glucose.value : data.sgv);
+      if (isNaN(current)) return;
+      var endTime = toMs(data.glucose.timestamp || data.datetime) || Date.now();
+      var key = String(data.glucose.trend || data.direction || 'flat')
+        .toLowerCase().replace(/[\s_-]/g, '');
+      var slopePerStep = 0;
+      if (key === 'doubleup' || key === 'risingfast')      slopePerStep = -0.7;
+      else if (key === 'singleup' || key === 'rising')     slopePerStep = -0.45;
+      else if (key === 'fortyfiveup' || key === 'risingslowly')     slopePerStep = -0.22;
+      else if (key === 'fortyfivedown' || key === 'fallingslowly')  slopePerStep = 0.22;
+      else if (key === 'singledown' || key === 'falling')  slopePerStep = 0.45;
+      else if (key === 'doubledown' || key === 'fallingfast') slopePerStep = 0.7;
+      for (var j = 5; j >= 0; j--) {
+        var t2 = endTime - j * 30 * 60 * 1000;
+        var v2 = Math.max(current + slopePerStep * j, 2.0);
+        points.push([t2, Math.round(v2 * 10) / 10]);
       }
-      
-      if (glucoseTrend && typeof glucoseTrend === 'string') {
-        var normalized = glucoseTrend.toLowerCase().replace(/[\s_-]/g, '');
-        if (normalized === 'doubleup' || normalized === 'risingfast' || normalized === 'risingfastly') {
-          trend = "rising_fast";
-        } else if (normalized === 'singleup' || normalized === 'rising') {
-          trend = "rising";
-        } else if (normalized === 'fortyfiveup' || normalized === 'risingslowly') {
-          trend = "rising_slowly";
-        } else if (normalized === 'flat' || normalized === 'stable') {
-          trend = "stable";
-        } else if (normalized === 'fortyfivedown' || normalized === 'fallingslowly') {
-          trend = "falling_slowly";
-        } else if (normalized === 'singledown' || normalized === 'falling') {
-          trend = "falling";
-        } else if (normalized === 'doubledown' || normalized === 'fallingfast') {
-          trend = "falling_fast";
-        }
+    }
+    if (points.length < 2) return;
+
+    function render() {
+      var el = document.getElementById('{{ chart_id }}');
+      if (!el) return false;
+      if (window.Highcharts) {
+        Highcharts.chart(el, {
+          chart: { type: 'line', height: 56, backgroundColor: 'transparent', animation: false, margin: [2, 2, 2, 2] },
+          title: { text: null }, credits: { enabled: false }, legend: { enabled: false }, tooltip: { enabled: false },
+          xAxis: { type: 'datetime', visible: false },
+          yAxis: { visible: false, softMin: 3, softMax: 11, startOnTick: false, endOnTick: false },
+          plotOptions: {
+            line: {
+              marker: { enabled: false },
+              lineWidth: 1.6,
+              animation: false,
+              enableMouseTracking: false,
+              color: '#000'
+            }
+          },
+          series: [{ data: points }]
+        });
+      } else {
+        renderSvg(el, points);
       }
-    } catch (e) {
-      console.log("Error parsing glucose data:", e);
-      return;
-    }
-    
-    if (glucoseNum === 0) {
-      console.log("No valid glucose data for chart");
-      return;
-    }
-    
-    // Convert glucose data to chart format
-    const glucoseData = [];
-    
-    // Create 3 data points for a simple trend visualization
-    for (let i = 2; i >= 0; i--) {
-      const timeOffset = i * 30 * 60 * 1000; // 30 minutes apart
-      const time = glucoseTime - timeOffset;
-      
-      // Simple trend simulation based on direction
-      let trendValue = glucoseNum;
-      if (trend === "rising" || trend === "rising_fast") {
-        trendValue = trendValue - (i * 0.8); // was rising
-      } else if (trend === "falling" || trend === "falling_fast") {
-        trendValue = trendValue + (i * 0.8); // was falling
-      } else if (trend === "rising_slowly") {
-        trendValue = trendValue - (i * 0.4); // gentle rise
-      } else if (trend === "falling_slowly") {
-        trendValue = trendValue + (i * 0.4); // gentle fall
-      }
-      
-      glucoseData.push({
-        datetime: time,
-        value: Math.max(trendValue, 2.0) // minimum reasonable value
-      });
+      return true;
     }
 
-    if (glucoseData.length === 0) {
-      return; // No data to chart
+    function renderSvg(el, pts) {
+      el.innerHTML = '';
+      var rect = el.getBoundingClientRect();
+      var w = Math.max(Math.floor(rect.width), 160);
+      var h = Math.max(Math.floor(rect.height), 50);
+      var xs = pts.map(function(p){ return p[0]; });
+      var ys = pts.map(function(p){ return p[1]; });
+      var xMin = Math.min.apply(null, xs), xMax = Math.max.apply(null, xs);
+      if (xMax === xMin) xMax = xMin + 1;
+      var yMin = Math.min.apply(null, ys) - 0.5;
+      var yMax = Math.max.apply(null, ys) + 0.5;
+      if (yMax === yMin) yMax = yMin + 1;
+      var poly = pts.map(function(p){
+        var x = Math.round(((p[0] - xMin) / (xMax - xMin)) * (w - 4) + 2);
+        var y = Math.round((1 - (p[1] - yMin) / (yMax - yMin)) * (h - 4) + 2);
+        return x + ',' + y;
+      }).join(' ');
+      var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('width', '100%');
+      svg.setAttribute('height', '100%');
+      svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+      svg.setAttribute('preserveAspectRatio', 'none');
+      var line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+      line.setAttribute('points', poly);
+      line.setAttribute('fill', 'none');
+      line.setAttribute('stroke', '#000');
+      line.setAttribute('stroke-width', '1.6');
+      svg.appendChild(line);
+      el.appendChild(svg);
     }
 
-    // Chart setup for mmol/L
-    const chartConfig = {
-      thresholds: [4.0, 7.8, 10.0], // low, target, high thresholds
-      unit: "mmol/L",
-      formatValue: (x) => x ? (Math.round(x * 10) / 10) : x,
-    };
-
-    const data = glucoseData.map((x) => [x.datetime, chartConfig.formatValue(x.value)]);
-    const minVal = chartConfig.formatValue(Math.min(...glucoseData.map(x => x.value)));
-    const minBorder = (!minVal || chartConfig.thresholds[0] < minVal) ? chartConfig.thresholds[0] : minVal;
-
-    var containerEl = document.getElementById("{{chart_id}}");
-    if (!containerEl) return;
-
-    if (window.Highcharts) {
-      var gray30 = getComputedStyle(document.documentElement).getPropertyValue('--color-gray-30').trim() || '#4d4d4d';
-      Highcharts.chart(containerEl, {
-        chart: {
-          type: 'line',
-          height: 120,
-          backgroundColor: 'transparent',
-          style: { fontFamily: 'inherit' },
-          animation: false,
-        },
-        title: { text: null },
-        credits: { enabled: false },
-        legend: { enabled: false },
-        tooltip: { enabled: false },
-        xAxis: {
-          type: 'datetime',
-          labels: { enabled: false },
-          lineWidth: 0,
-          tickWidth: 0,
-          gridLineWidth: 0,
-        },
-        yAxis: {
-          title: { text: null },
-          labels: { enabled: false },
-          min: minBorder,
-          softMin: minBorder,
-          softMax: chartConfig.thresholds[2],
-          startOnTick: false,
-          gridLineWidth: 0,
-          lineWidth: 0,
-          tickWidth: 0,
-        },
-        plotOptions: {
-          series: {
-            threshold: null,
-            animation: false,
-            lineWidth: 1,
-            enableMouseTracking: false,
-            marker: { enabled: false },
-            states: { inactive: { opacity: 0.3 } }
-          }
-        },
-        series: [{
-          data: data,
-          color: gray30
-        }]
-      });
-      return;
-    }
-
-    // Fallback: lightweight inline SVG line
-    // Clear container
-    containerEl.innerHTML = '';
-    var rect = containerEl.getBoundingClientRect();
-    var width = Math.max(Math.floor(rect.width), 300);
-    var height = Math.max(Math.floor(rect.height), 120);
-    var yMin = minBorder;
-    var yMax = chartConfig.thresholds[2];
-    var xMin = Math.min.apply(null, glucoseData.map(function(p){return p.datetime;}));
-    var xMax = Math.max.apply(null, glucoseData.map(function(p){return p.datetime;}));
-    if (xMax === xMin) { xMax = xMin + 1; }
-
-    var mapX = function(x){ return Math.round(((x - xMin) / (xMax - xMin)) * (width - 4)) + 2; };
-    var clamp = function(v, a, b){ return Math.min(Math.max(v, a), b); };
-    var mapY = function(y){
-      var cy = (1 - (clamp(y, yMin, yMax) - yMin) / (yMax - yMin)) * (height - 4) + 2;
-      return Math.round(cy);
-    };
-
-    var points = glucoseData.map(function(p){ return mapX(p.datetime) + "," + mapY(p.value); }).join(' ');
-    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('width', '100%');
-    svg.setAttribute('height', '100%');
-    svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
-    svg.setAttribute('preserveAspectRatio', 'none');
-
-    var polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-    polyline.setAttribute('points', points);
-    polyline.setAttribute('fill', 'none');
-    var gray30 = getComputedStyle(document.documentElement).getPropertyValue('--color-gray-30').trim() || '#4d4d4d';
-    polyline.setAttribute('stroke', gray30);
-    polyline.setAttribute('stroke-width', '2');
-    svg.appendChild(polyline);
-    containerEl.appendChild(svg);
-  };
-
-  // Initialize chart when DOM is ready and container exists
-  (function initGlucoseChart() {
-    var attemptInit = function() {
-      var container = document.getElementById("{{chart_id}}");
-      if (container) {
-        createGlucoseBackgroundChart();
-        return true;
-      }
-      return false;
-    };
-
-    if (attemptInit()) return;
-
+    if (render()) return;
     var attempts = 0;
-    var maxAttempts = 30; // ~4.5s at 150ms
-    var intervalId = setInterval(function() {
-      attempts += 1;
-      if (attemptInit() || attempts >= maxAttempts) {
-        clearInterval(intervalId);
-      }
+    var iv = setInterval(function() {
+      if (render() || ++attempts > 30) clearInterval(iv);
     }, 150);
   })();
 </script>
 
-<!-- Rest of your CSS remains the same -->
 <style>
-  /* Small grey divider for each departure item */
-  .departure-divider {
-    height: 1px;
-    width: 100%;
-    background: var(--color-gray-30);
-    margin: 0 0 0 72px;
-    border: none;
+  :root {
+    --black: #000;
+    --white: #fff;
+    --gray-soft: rgba(0, 0, 0, 0.12);
+    --font: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   }
 
-  /* --- OVERFLOW PREVENTION (working) --- */
-  .dashboard-root {
-    width: 100%;
-    overflow-x: hidden;
+  * { box-sizing: border-box; font-family: var(--font) !important; }
+  body { margin: 0; padding: 0; background: var(--white); color: var(--black); }
+
+  .dashboard {
     padding: 16px;
-    box-sizing: border-box;
-  }
-
-  .dashboard-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
     min-height: 100vh;
-  }
-  
-  .dashboard-col {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    min-width: 0;
-    overflow: hidden;
+    width: 100%;
   }
 
-  /* --- GLUCOSE CHART BACKGROUND STYLES --- */
-  .glucose-with-chart {
-    position: relative;
-    overflow: hidden;
+  .grid {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 16px;
+    min-height: calc(100vh - 32px);
   }
 
-  .glucose-chart-background {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 1;
-    opacity: 1;
-    pointer-events: none; /* Prevent interaction with background chart */
-    min-height: 120px; /* ensure space for chart */
+  .col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .col--left { gap: 10px; }
+
+  /* ---------- TIME ---------- */
+  .time-block { padding: 2px 2px 0; }
+  .time-main {
+    font-size: 3.25rem;
+    font-weight: 800;
+    line-height: 0.95;
+    letter-spacing: -0.03em;
+    font-feature-settings: "tnum";
+  }
+  .time-sub {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    margin-top: 6px;
   }
 
-  .glucose-with-chart .data-row {
-    position: relative;
-    z-index: 2; /* Ensure text appears above chart */
+  .rule { height: 1px; background: var(--black); opacity: 0.2; margin: 2px 0; }
+
+  .section-label {
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    opacity: 0.7;
+    text-transform: uppercase;
   }
 
-  /* Text outline for readability over chart background */
-  .glucose-with-chart .glucose-main,
-  .glucose-with-chart .glucose-sub,
-  .glucose-with-chart .glucose-meta {
-    text-shadow: 
-      -1px -1px 0 #fff,
-       1px -1px 0 #fff,
-      -1px  1px 0 #fff,
-       1px  1px 0 #fff,
-       0 -1px 0 #fff,
-       0  1px 0 #fff,
-      -1px  0 0 #fff,
-       1px  0 0 #fff;
+  /* ---------- VITALS ---------- */
+  .vitals { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .vital {
+    background: var(--white);
+    border: 1px solid var(--black);
+    border-radius: 8px;
+    padding: 8px 10px;
   }
-
-  /* --- REMOVED OUTLINES FROM TRANSPORT ITEMS (HERE'S THE FIX) --- */
-  .departure-item {
+  .vital__label {
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    opacity: 0.7;
+  }
+  .vital__row {
     display: flex;
     align-items: center;
-    min-height: 60px;
-    padding: 12px;
-    /* REMOVED: border: var(--border-width-thin) solid var(--color-black); */
-    overflow: hidden;
+    justify-content: space-between;
+    gap: 4px;
+    margin-top: 4px;
   }
-  
-  /* Keep the alternating background for visual separation */
-
-  /* --- TEXT ELEMENTS --- */
-  .departure-destination {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 100%;
+  .vital__value {
+    font-size: 1.5rem;
+    font-weight: 800;
+    line-height: 1;
+    font-feature-settings: "tnum";
   }
+  .vital__value--sm { font-size: 1rem; letter-spacing: -0.01em; }
+  .vital__icon { width: 18px; height: 18px; color: var(--black); flex-shrink: 0; }
 
-  /* --- FULL VISUAL STYLING (unchanged) --- */
-  :root {
-    --color-black: #000000;
-    --color-white: #ffffff;
-    --color-gray-30: #4d4d4d;
-    --color-gray-55: #8c8c8c;
-    --color-accent: var(--color-black);
-    --color-accent-light: var(--color-gray-55);
-
-    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    --font-size-large: 3.5rem;
-    --font-size-medium: 2.5rem;
-    --font-size-small: 1.2rem;
-    --font-weight-bold: 700;
-    --font-weight-medium: 500;
-
-    --border-width-thick: 3px;
-    --border-width-normal: 2px;
-    --border-width-thin: 1px;
-    --border-radius-card: 8px;
-    --border-radius-badge: 6px;
-  }
-
-  * { 
-    font-family: var(--font-sans) !important; 
-    box-sizing: border-box; 
-  }
-  
-  body { 
-    margin: 0; 
-    padding: 0; 
-    background: var(--color-white);
-    min-height: 100vh;
-  }
-  
-  .text--accent { color: var(--color-accent) !important; }
-  .bg--white { background-color: var(--color-white); }
-  .bg--accent-light { background-color: var(--color-accent-light); }
-
-  /* --- Cards --- */
+  /* ---------- CARD BASE ---------- */
   .card {
-    border-radius: var(--border-radius-card);
-    border: var(--border-width-normal) solid var(--color-black);
-    padding: 16px;
-  }
-  
-  .card--time {
-    background-color: var(--color-white);
-    border-width: var(--border-width-thick);
-    text-align: center;
-  }
-  
-  .time-main {
-    font-size: var(--font-size-large);
-    font-weight: var(--font-weight-bold);
-    line-height: 0.9;
-    white-space: nowrap;
-    overflow: hidden;
-  }
-  
-  .time-period {
-    font-size: 0.6em;
-    margin-left: 0.2em;
-    font-weight: var(--font-weight-medium);
-  }
-  
-  .time-sub {
-    margin-top: 8px;
-    font-size: var(--font-size-small);
+    background: var(--white);
+    border: 1px solid var(--black);
+    border-radius: 10px;
+    padding: 12px;
   }
 
-  .card--weather, .card--glucose {
-    background-color: var(--color-gray-55);
-  }
-  
-  .card--glucose-alert {
-    border: var(--border-width-thick) solid var(--color-accent);
-  }
-
-  .data-row {
+  /* ---------- GLUCOSE ---------- */
+  .card--glucose { display: flex; flex-direction: column; position: relative; }
+  .glucose__head {
     display: flex;
+    justify-content: space-between;
     align-items: flex-start;
-    gap: 12px;
+    gap: 8px;
   }
-  
-  .icon-container {
+  .trend-pill {
+    width: 24px;
+    height: 22px;
+    border: 1px solid var(--black);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    font-weight: 700;
+    background: var(--white);
     flex-shrink: 0;
   }
-  
-  .weather-icon, .glucose-icon {
-    width: 60px;
-    height: 60px;
-    border: var(--border-width-normal) solid var(--color-black);
-    border-radius: var(--border-radius-card);
-    background-color: var(--color-white);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 2.5rem;
-  }
-
-  .weather-icon {
-    color: var(--color-black);
-  }
-
-  .icon-svg {
-    width: 32px;
-    height: 32px;
-    display: block;
-  }
-  
-  .glucose-icon {
-    background-color: var(--color-gray-30);
-  }
-  
-  .glucose-icon--alert {
-    background-color: var(--color-accent);
-    color: var(--color-white);
-  }
-
-  .data-details {
-    flex: 1;
-  }
-  
-  .temp-main, .glucose-main {
-    font-size: var(--font-size-medium);
-    font-weight: var(--font-weight-bold);
-  }
-  
-  .temp-sub, .glucose-sub {
-    font-size: 1rem;
-  }
-  
-  .temp-meta, .glucose-meta {
-    font-size: 0.875rem;
-    margin-top: 4px;
-  }
-
-  .card--transport-header {
-    background-color: var(--color-gray-55);
-  }
-  
-  .transport-title {
-    font-weight: var(--font-weight-bold);
-    font-size: 1.125rem;
-  }
-  
-  .transport-location {
-    font-size: 0.875rem;
-    margin-top: 4px;
-  }
-
-  /* --- Departures List --- */
-  .departures-list {
-    display: flex;
-    flex-direction: column;
-    gap: 2px; /* This creates subtle spacing between items */
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-  }
-  
-  .departure-route {
-    width: 60px;
-    display: flex;
-    justify-content: center;
-  }
-  
-  .route-badge {
-    display: inline-block;
-    padding: 8px 12px;
-    border-radius: var(--border-radius-badge);
-    font-weight: var(--font-weight-bold);
-    color: var(--color-white);
-    background-color: var(--color-black);
-    border: var(--border-width-normal) solid var(--color-black);
-    min-width: 45px;
-    text-align: center;
-    font-size: 1rem;
-  }
-  
-  .route-badge--alert {
-    background-color: var(--color-accent);
-  }
-
-  .departure-info {
-    flex: 1;
-    padding: 0 12px;
-    overflow: hidden;
-  }
-  
-  .departure-destination {
-    font-weight: var(--font-weight-medium);
-    font-size: 1rem;
-  }
-
-  .departure-timing {
-    width: 80px;
-    text-align: right;
-  }
-  
-  .timing-main {
-    font-weight: var(--font-weight-bold);
-    font-size: 1rem;
-  }
-  
-  .timing-main--alert {
-    color: var(--color-accent);
-  }
-  
-  .timing-delay {
-    font-size: 0.875rem;
+  .glucose__value {
+    font-size: 1.55rem;
+    font-weight: 800;
     margin-top: 2px;
-    color: var(--color-accent);
+    line-height: 1.1;
+    font-feature-settings: "tnum";
+  }
+  .glucose__chart { height: 56px; margin-top: 4px; }
+  .glucose__updated {
+    font-size: 0.55rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    opacity: 0.6;
+    margin-top: 4px;
   }
 
-  .card--no-departures {
-    background-color: var(--color-gray-55);
+  /* Inverted alert state */
+  .card--alert { background: var(--black); color: var(--white); }
+  .card--alert .section-label,
+  .card--alert .glucose__updated { opacity: 0.85; }
+  .card--alert .trend-pill {
+    border-color: var(--white);
+    color: var(--white);
+    background: var(--black);
+  }
+
+  /* ---------- SCHEDULE ---------- */
+  .card--schedule { padding: 12px 14px; }
+  .schedule {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    margin-top: 6px;
+  }
+  .schedule__event {
+    padding: 2px 12px 2px 0;
+    min-width: 0;
+  }
+  .schedule__event + .schedule__event {
+    border-left: 1px solid var(--black);
+    padding-left: 14px;
+    padding-right: 0;
+  }
+  .schedule__event--empty {
+    grid-column: 1 / -1;
+    border-left: none !important;
+    padding: 4px 0;
+    opacity: 0.55;
+  }
+  .schedule__title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  .schedule__time {
+    font-size: 0.68rem;
+    font-weight: 600;
+    opacity: 0.65;
+    margin-top: 4px;
+    letter-spacing: 0.02em;
+    font-feature-settings: "tnum";
+  }
+
+  /* ---------- TRANSIT ---------- */
+  .card--transit { padding: 0; overflow: hidden; }
+  .transit__header {
+    background: var(--black);
+    color: var(--white);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 14px;
+  }
+  .transit__title {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+  }
+  .transit__icon { width: 18px; height: 18px; color: var(--white); }
+  .transit__body { padding: 4px 14px 6px; }
+  .transit-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 7px 0;
+    min-height: 36px;
+  }
+  .transit-row__badge {
+    min-width: 40px;
+    padding: 3px 6px;
+    border: 1.5px solid var(--black);
+    border-radius: 4px;
+    font-weight: 800;
+    font-size: 0.72rem;
+    text-align: center;
+    background: var(--white);
+    color: var(--black);
+    flex-shrink: 0;
+  }
+  .transit-row__dest {
     flex: 1;
+    font-size: 0.88rem;
+    font-weight: 500;
+    min-width: 0;
+  }
+  .transit-row__time {
+    font-size: 0.85rem;
+    font-weight: 800;
+    flex-shrink: 0;
+    text-align: right;
+    font-feature-settings: "tnum";
+  }
+  .transit-row__delay {
+    font-weight: 600;
+    opacity: 0.6;
+    font-size: 0.78rem;
+  }
+  .transit-row__rule { height: 1px; background: var(--gray-soft); }
+  .transit-row--empty {
+    padding: 14px 0;
+    text-align: center;
+    opacity: 0.5;
+    font-size: 0.85rem;
+  }
+
+  /* ---------- WEATHER + FORECAST ---------- */
+  .weather-row {
+    display: grid;
+    grid-template-columns: minmax(160px, 1fr) 2fr;
+    gap: 12px;
+  }
+  .card--now {
+    background: var(--black);
+    color: var(--white);
+    border-color: var(--black);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+  }
+  .now__icon { width: 40px; height: 40px; color: var(--white); flex-shrink: 0; }
+  .now__icon svg { width: 100%; height: 100%; display: block; }
+  .now__text { display: flex; flex-direction: column; min-width: 0; }
+  .now__temp {
+    font-size: 1.8rem;
+    font-weight: 800;
+    line-height: 1;
+    font-feature-settings: "tnum";
+  }
+  .now__desc {
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    margin-top: 5px;
+  }
+
+  .card--forecast {
     display: flex;
     flex-direction: column;
-    align-items: center;
     justify-content: center;
-    text-align: center;
-    border-width: var(--border-width-normal);
+    padding: 12px 16px;
   }
-  
-  .no-departures-icon {
-    font-size: 2rem;
-    margin-bottom: 8px;
+  .forecast__main {
+    font-size: 1rem;
+    font-weight: 700;
+    margin-top: 4px;
   }
-
-  .card--service-status {
-    background-color: var(--color-gray-55);
-    border: var(--border-width-thin) solid var(--color-black);
-    padding: 12px;
-    margin-top: 8px;
-  }
-  
-  .card--service-status-alert {
-    background-color: var(--color-gray-30);
-    border: var(--border-width-normal) solid var(--color-black);
-    color: var(--color-white);
+  .forecast__sub {
+    font-size: 0.78rem;
+    font-weight: 500;
+    opacity: 0.75;
+    margin-top: 4px;
+    line-height: 1.35;
   }
 
-  .card--service-status-alert .service-status-text {
-    color: var(--color-white);
-  }
-  
-  .service-status-text {
-    font-size: 0.875rem;
-  }
-
-  /* --- Utilities --- */
+  /* ---------- UTILITIES ---------- */
   .clamp--1 {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-
-  /* --- Responsive --- */
-  @media (max-width: 600px) {
-    .dashboard-grid {
-      grid-template-columns: 1fr;
-      gap: 8px;
-    }
-    
-    .time-main {
-      font-size: 3rem;
-    }
-  }
-  
-  @media (max-width: 400px) {
-    .time-main {
-      font-size: 2.5rem;
-    }
-  }
-  
-  /* Shading classes (2-bit, 4 grays) */
-  .bg--black { background-color: var(--color-black); }
-  .bg--white { background-color: var(--color-white); }
-  .bg--gray-30 { background-color: var(--color-gray-30); }
-  .bg--gray-55 { background-color: var(--color-gray-55); }
-  .text--black { color: var(--color-black); }
-  .text--white { color: var(--color-white); }
-  .text--gray-30 { color: var(--color-gray-30); }
-  .text--gray-55 { color: var(--color-gray-55); }
 </style>
